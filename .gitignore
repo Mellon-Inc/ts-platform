@@ -169,3 +169,58 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 仮想環境
+venv/
+ENV/
+env/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Streamlit
+.streamlit/
+
+# データファイル
+*.csv
+*.xlsx
+*.xls
+*.json
+*.pkl
+*.joblib
+*.h5
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
