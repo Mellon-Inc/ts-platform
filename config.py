@@ -4,7 +4,7 @@
 
 # アプリ設定
 APP_TITLE = "Mellon"
-APP_DESCRIPTION = "時系列データの分析と予測を簡単に行えるプラットフォーム"
+APP_DESCRIPTION = "Integrated Time-Series Analysis Platform"
 
 # モデル設定
 AVAILABLE_MODELS = {

@@ -85,7 +85,7 @@ def get_data_summary(df: pd.DataFrame) -> Dict:
     
     return summary
 
-def suggest_date_column(df: pd.DataFrame) -> Optional[str]:
+def detect_date_column(df: pd.DataFrame) -> Optional[str]:
     """
     日付列を推測
     
