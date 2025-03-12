@@ -39,6 +39,9 @@ def show_training_page():
     
     # EDA結果からの推奨モデル選択
     recommended_model = recommend_model(eda_results)
+    # 推奨モデルがNoneの場合のデフォルト値を設定
+    if recommended_model is None:
+        recommended_model = "Prophet"  # デフォルトモデルをProphetに設定
     
     # モデル選択オプション
     model_options = {
@@ -265,8 +268,33 @@ def show_training_page():
 # モデル推奨関数
 def recommend_model(eda_results):
     """EDA結果に基づいて最適なモデルを推奨する"""
-    # 新しい実装や修正の提案
-    # ...
+    # デフォルトはProphet
+    recommended_model = "Prophet"
+    
+    # EDA結果から適切なモデルを判断
+    # 残差の複雑さ、季節性、周期性などに基づいて判断
+    trend = eda_results.get('trend', np.array([]))
+    seasonal = eda_results.get('seasonal', np.array([]))
+    resid = eda_results.get('resid', np.array([]))
+    
+    if len(resid) > 0:
+        # 残差の複雑さを評価
+        resid_complexity = np.abs(np.diff(resid)).mean()
+        
+        # 複雑な残差パターンがある場合はLGBMを推奨
+        if resid_complexity > 0.2:
+            recommended_model = "LGBM"
+    
+    # 季節性の強さに基づいて判断
+    if len(seasonal) > 0 and len(eda_results.get('data', [])) > 0:
+        seasonal_sum = np.sum(seasonal, axis=1) if seasonal.ndim > 1 else seasonal
+        seasonal_contrib = np.var(seasonal_sum) / np.var(eda_results['data'])
+        
+        # 強い季節性があるならProphetを推奨
+        if seasonal_contrib > 0.3:
+            recommended_model = "Prophet"
+    
+    return recommended_model
 
 # Prophetパラメータ推奨関数
 def recommend_prophet_params(eda_results):
