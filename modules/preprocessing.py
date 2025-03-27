@@ -42,11 +42,26 @@ def show_preprocessing_page():
                 index=0
             )
             
+            # 対象列の選択（全列選択オプション付き）
+            all_cols = st.checkbox("すべての列に適用", value=True)
+            
+            if not all_cols:
+                selected_cols = st.multiselect(
+                    "欠損値補完の対象列を選択してください",
+                    options=missing_cols,
+                    default=missing_cols
+                )
+            else:
+                selected_cols = missing_cols
+            
             # 適用ボタン
             if st.button("欠損値補完を適用", key="apply_imputation"):
-                st.info(f"選択された方法: {imputation_method}で欠損値を補完します")
-                # ここに実際の欠損値補完ロジックを実装
-                st.success("欠損値補完が完了しました")
+                if not selected_cols:
+                    st.warning("対象列がありません")
+                else:
+                    st.info(f"選択された方法: {imputation_method}で欠損値を補完します")
+                    # ここに実際の欠損値補完ロジックを実装
+                    st.success("欠損値補完が完了しました")
     
     # 外れ値除去タブ
     with preprocessing_tab[1]:
@@ -65,11 +80,16 @@ def show_preprocessing_page():
                 index=0
             )
             
-            # 対象列の選択
-            selected_cols = st.multiselect(
-                "外れ値検出の対象列を選択してください",
-                options=numeric_cols
-            )
+            # 対象列の選択（全列選択オプション付き）
+            all_cols = st.checkbox("すべての数値列に適用", value=True)
+            
+            if not all_cols:
+                selected_cols = st.multiselect(
+                    "外れ値検出の対象列を選択してください",
+                    options=numeric_cols
+                )
+            else:
+                selected_cols = numeric_cols
             
             # しきい値の設定
             threshold = st.slider("しきい値", min_value=1.0, max_value=5.0, value=3.0, step=0.1)
@@ -226,11 +246,16 @@ def show_preprocessing_page():
                 index=0
             )
             
-            # 対象列の選択
-            selected_cols = st.multiselect(
-                "正規化の対象列を選択してください",
-                options=numeric_cols
-            )
+            # 対象列の選択（全列選択オプション付き）
+            all_cols = st.checkbox("すべての数値列を正規化", value=True)
+            
+            if not all_cols:
+                selected_cols = st.multiselect(
+                    "正規化の対象列を選択してください",
+                    options=numeric_cols
+                )
+            else:
+                selected_cols = numeric_cols
             
             # 適用ボタン
             if st.button("正規化を適用", key="apply_normalization"):
