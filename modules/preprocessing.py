@@ -289,30 +289,11 @@ def show_preprocessing_page():
                     # 結果の表示
                     st.success(f"{normalization_method}による正規化が完了しました")
                     
-                    # 処理前後の比較
-                    st.subheader("正規化前後の比較")
-                    
-                    # 箱ひげ図とヒストグラムの比較
-                    for col in selected_cols:
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write(f"正規化前: {col}")
-                            fig = px.box(df_before, y=col, title=f"{col} (正規化前)")
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # ヒストグラム
-                            hist_fig = px.histogram(df_before, x=col, title=f"{col}のヒストグラム (正規化前)")
-                            st.plotly_chart(hist_fig, use_container_width=True)
-                        
-                        with col2:
-                            st.write(f"正規化後: {col}")
-                            fig = px.box(df, y=col, title=f"{col} (正規化後)")
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            # ヒストグラム
-                            hist_fig = px.histogram(df, x=col, title=f"{col}のヒストグラム (正規化後)")
-                            st.plotly_chart(hist_fig, use_container_width=True)
+                    # 処理後のデータを更新
+                    st.session_state.data = df
+                    # 元のデータを保持
+                    if 'original_data' not in st.session_state:
+                        st.session_state.original_data = df_before
     # 前処理後のデータプレビュー
     st.subheader("データプレビュー")
     
