@@ -382,6 +382,10 @@ def train_prophet_model(train_data, test_data, date_col, target_col, params):
     train_df = train_data[[date_col, target_col]].rename(columns={date_col: 'ds', target_col: 'y'})
     test_df = test_data[[date_col, target_col]].rename(columns={date_col: 'ds', target_col: 'y'})
     
+    # タイムゾーン情報を削除
+    train_df['ds'] = pd.to_datetime(train_df['ds']).dt.tz_localize(None)
+    test_df['ds'] = pd.to_datetime(test_df['ds']).dt.tz_localize(None)
+    
     # モデルの初期化
     model = Prophet(
         seasonality_mode=params["seasonality_mode"],

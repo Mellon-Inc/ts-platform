@@ -204,6 +204,10 @@ def forecast_with_prophet(model, last_date, periods, unit, date_col, target_col)
     if isinstance(last_date, str):
         last_date = pd.to_datetime(last_date)
     
+    # タイムゾーン情報を削除して日付の型を統一
+    last_date = pd.to_datetime(last_date).tz_localize(None)
+    forecast_df[date_col] = pd.to_datetime(forecast_df[date_col]).dt.tz_localize(None)
+    
     # 予測結果をデバッグ出力
     st.write(f"予測総レコード数: {len(forecast_df)}")
     st.write(f"最終日付: {last_date}")

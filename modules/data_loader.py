@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from typing import Optional, Dict, Any, Union
+import os
 
 @st.cache_data(ttl=3600)
 def load_data(file_obj: Any) -> pd.DataFrame:
@@ -19,8 +20,23 @@ def load_data(file_obj: Any) -> pd.DataFrame:
         読み込まれたデータフレーム
     """
     try:
-        # CSVファイルを読み込む
-        df = pd.read_csv(file_obj)
+        # ファイル名を取得
+        file_name = file_obj.name
+        file_extension = os.path.splitext(file_name)[1].lower()
+        
+        # ファイル拡張子に基づいて適切な読み込み方法を選択
+        if file_extension == '.csv':
+            df = pd.read_csv(file_obj)
+        elif file_extension in ['.xlsx', '.xls']:
+            try:
+                df = pd.read_excel(file_obj)
+            except ImportError:
+                st.error("Excelファイルを読み込むには'openpyxl'が必要です。'pip install openpyxl'でインストールしてください。")
+                return None
+        else:
+            st.error(f"サポートされていないファイル形式です: {file_extension}")
+            return None
+            
         return df
     except Exception as e:
         st.error(f"データの読み込みエラー: {str(e)}")

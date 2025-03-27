@@ -170,7 +170,7 @@ def show_eda_page():
                     
                     # データをProphet用に準備
                     prophet_data = pd.DataFrame({
-                        'ds': data[date_col].values,  # 日付列
+                        'ds': pd.to_datetime(data[date_col]).dt.tz_localize(None),  # タイムゾーン情報を削除
                         'y': target_data  # ターゲット列
                     })
                     
