@@ -150,276 +150,187 @@ def show_eda_page():
                     elif freq == 'H':
                         if 23.5 <= p <= 24.5:
                             st.write(f"- 周期 {p:.1f}: 日次の季節性")
+
+            # Prophetを使用して時系列分解
+            st.subheader("Prophetによる時系列分解")
+            
+            try:
+                # 周期を整数に丸めて使用
+                mstl_periods = [int(round(p)) for p in sorted_periods]
+                # 重複を除去して昇順にソート
+                mstl_periods = sorted(list(set(mstl_periods)))
+                
+                # 0より大きい周期のみを使用
+                valid_periods = [p for p in mstl_periods if 0 < p <= len(target_data)]
+                
+                if valid_periods and len(valid_periods) > 0:
+                    # Prophetのインポート
+                    from prophet import Prophet
+                    import pandas as pd
+                    
+                    # データをProphet用に準備
+                    prophet_data = pd.DataFrame({
+                        'ds': data[date_col].values,  # 日付列
+                        'y': target_data  # ターゲット列
+                    })
+                    
+                    st.info("Prophetモデルをトレーニングしています...")
+                    
+                    # Prophetモデルのトレーニング
+                    model = Prophet(
+                        yearly_seasonality=True,
+                        weekly_seasonality=True,
+                        daily_seasonality=False,
+                        seasonality_mode='additive'
+                    )
+                    
+                    # 任意の周期性を追加
+                    for period in valid_periods:
+                        if period > 2:  # 意味のある周期のみ追加
+                            model.add_seasonality(
+                                name=f'custom_{period}',
+                                period=period,
+                                fourier_order=5  # 複雑さの調整
+                            )
+                    
+                    # モデルのフィット
+                    model.fit(prophet_data)
+                    
+                    # 予測と成分の取得
+                    forecast = model.predict(prophet_data)
+                    
+                    # トレンド、季節性、残差の抽出
+                    trend = forecast['trend'].values
+                    seasonality = forecast['yearly'] + forecast['weekly']
+                    
+                    # カスタム周期性を追加
+                    for period in valid_periods:
+                        if period > 2 and f'custom_{period}' in forecast.columns:
+                            seasonality += forecast[f'custom_{period}']
+                    
+                    # 残差の計算
+                    residuals = target_data - trend - seasonality.values
+                    
+                    # 分析結果をセッションに保存
+                    st.session_state.eda_results = {
+                        'trend': trend,
+                        'seasonal': seasonality.values.reshape(-1, 1),
+                        'seasonal_components': {
+                            'yearly': forecast['yearly'].values,
+                            'weekly': forecast['weekly'].values
+                        },
+                        'resid': residuals,
+                        'periods': valid_periods,
+                        'data': target_data
+                    }
+                    
+                    # カスタムプロットで可視化
+                    fig_decomp = make_subplots(
+                        rows=3, 
+                        cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.05,
+                        subplot_titles=('元データとトレンド成分', '季節成分', '残差成分')
+                    )
+                    
+                    # 元データとトレンド成分
+                    fig_decomp.add_trace(
+                        go.Scatter(
+                            y=target_data, 
+                            mode='lines', 
+                            name='元データ',
+                            line=dict(color='#1f77b4', width=1.5),
+                            fill='tozeroy',
+                            fillcolor='rgba(31, 119, 180, 0.1)'
+                        ),
+                        row=1, col=1
+                    )
+                    
+                    fig_decomp.add_trace(
+                        go.Scatter(
+                            y=trend, 
+                            mode='lines', 
+                            name='トレンド成分',
+                            line=dict(color='#d62728', width=3),
+                            opacity=0.9
+                        ),
+                        row=1, col=1
+                    )
+                    
+                    # 季節成分
+                    fig_decomp.add_trace(
+                        go.Scatter(
+                            y=seasonality, 
+                            mode='lines', 
+                            name='季節成分',
+                            line=dict(color='#2ca02c', width=2),
+                            opacity=0.8
+                        ),
+                        row=2, col=1
+                    )
+                    
+                    # 残差成分
+                    fig_decomp.add_trace(
+                        go.Scatter(
+                            y=residuals, 
+                            mode='lines', 
+                            name='残差成分',
+                            line=dict(color='#7f7f7f', width=1.5),
+                            opacity=0.8,
+                            fill='tozeroy',
+                            fillcolor='rgba(127, 127, 127, 0.1)'
+                        ),
+                        row=3, col=1
+                    )
+                    
+                    # レイアウトの調整
+                    fig_decomp.update_layout(
+                        height=900,
+                        template="plotly_white",
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
+                        margin=dict(l=60, r=60, t=120, b=60)
+                    )
+                    
+                    st.plotly_chart(fig_decomp, use_container_width=True)
+                    
+                    # 分解結果の統計情報
+                    st.subheader("成分分析")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    trend_contrib = np.var(trend)/np.var(target_data)*100
+                    seasonal_contrib = np.var(seasonality)/np.var(target_data)*100
+                    resid_contrib = np.var(residuals)/np.var(target_data)*100
+                    
+                    with col1:
+                        st.metric("トレンド成分の寄与度", f"{trend_contrib:.1f}%", 
+                                 delta=f"{trend_contrib-33.3:.1f}pp" if trend_contrib > 33.3 else f"{trend_contrib-33.3:.1f}pp")
+                    with col2:
+                        st.metric("季節成分の寄与度", f"{seasonal_contrib:.1f}%", 
+                                 delta=f"{seasonal_contrib-33.3:.1f}pp" if seasonal_contrib > 33.3 else f"{seasonal_contrib-33.3:.1f}pp")
+                    with col3:
+                        st.metric("残差成分の寄与度", f"{resid_contrib:.1f}%", 
+                                 delta=f"{resid_contrib-33.3:.1f}pp" if resid_contrib > 33.3 else f"{resid_contrib-33.3:.1f}pp")
+                    
+                    st.success("Prophetによる時系列分解が完了しました。")
+                else:
+                    st.info("有効な周期が見つかりませんでした。Prophetによる分解を実行できません。")
+            except Exception as e:
+                st.error(f"Prophet実行中にエラーが発生しました: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
+                
+                # Prophet未インストールの場合
+                if "No module named 'prophet'" in str(e):
+                    st.warning("Prophetモジュールがインストールされていません。以下のコマンドでインストールしてください:")
+                    st.code("pip install prophet")
         else:
             st.info("重要な周期成分は検出されませんでした。")
-
-        # 周波数成分の特定（元のコード）
-        threshold = 0.1 * np.max(np.abs(fft_result))
-        significant_freqs = freqs[np.abs(fft_result) > threshold]
-
-        # MSTLを使用して時系列分解
-        st.subheader("MSTLによる時系列分解")
-        
-        if len(significant_freqs) > 0:
-            try:
-                # 正の周波数のみを使用し、周期に変換
-                positive_freqs = [f for f in significant_freqs if f > 0]
-                if positive_freqs:
-                    periods = [int(1/f) for f in positive_freqs if 1/f > 2]  # 周期が2以上のものだけ使用
-                    
-                    if periods:
-                        mstl = MSTL(target_data, periods=periods)
-                        result = mstl.fit()
-                        
-                        # 結果を統合して可視化（より美しく改善）
-                        fig_decomp = make_subplots(
-                            rows=3, 
-                            cols=1,
-                            shared_xaxes=True,
-                            vertical_spacing=0.05,
-                            subplot_titles=('元データとトレンド成分', '季節成分', '残差成分')
-                        )
-                        
-                        # 元データとトレンド成分
-                        fig_decomp.add_trace(
-                            go.Scatter(
-                                y=target_data, 
-                                mode='lines', 
-                                name='元データ',
-                                line=dict(color='#1f77b4', width=1.5, dash='solid'),
-                                fill='tozeroy',
-                                fillcolor='rgba(31, 119, 180, 0.1)'
-                            ),
-                            row=1, col=1
-                        )
-                        
-                        fig_decomp.add_trace(
-                            go.Scatter(
-                                y=result.trend, 
-                                mode='lines', 
-                                name='トレンド成分',
-                                line=dict(color='#d62728', width=3, dash='solid'),
-                                opacity=0.9
-                            ),
-                            row=1, col=1
-                        )
-                        
-                        # 季節成分の可視化
-                        colors = px.colors.qualitative.Bold  # より鮮やかなカラーパレットを使用
-                        
-                        # 各季節成分を個別に表示
-                        seasonal_components = result.seasonal
-                        
-                        # 季節成分が1次元の場合は2次元に変換
-                        if len(seasonal_components.shape) == 1:
-                            seasonal_components = seasonal_components.reshape(-1, 1)
-                        
-                        for i, period in enumerate(periods):
-                            if i < seasonal_components.shape[1]:  # インデックスが範囲内かチェック
-                                color_idx = i % len(colors)
-                                fig_decomp.add_trace(
-                                    go.Scatter(
-                                        y=seasonal_components[:, i], 
-                                        mode='lines', 
-                                        name=f'季節成分 (周期: {period})',
-                                        line=dict(color=colors[color_idx], width=2),
-                                        opacity=0.8
-                                    ),
-                                    row=2, col=1
-                                )
-                        
-                        # 残差成分
-                        fig_decomp.add_trace(
-                            go.Scatter(
-                                y=result.resid, 
-                                mode='lines', 
-                                name='残差成分',
-                                line=dict(color='#7f7f7f', width=1.5),
-                                opacity=0.8,
-                                fill='tozeroy',
-                                fillcolor='rgba(127, 127, 127, 0.1)'
-                            ),
-                            row=3, col=1
-                        )
-                        
-                        # レイアウトの調整
-                        fig_decomp.update_layout(
-                            height=900,
-                            template="plotly_white",
-                            legend=dict(
-                                orientation="h",
-                                yanchor="bottom",
-                                y=1.02,
-                                xanchor="right",
-                                x=1,
-                                bgcolor='rgba(255, 255, 255, 0.8)',
-                                bordercolor='rgba(0, 0, 0, 0.2)',
-                                borderwidth=1
-                            ),
-                            margin=dict(l=60, r=60, t=120, b=60),
-                            paper_bgcolor='white',
-                            plot_bgcolor='white',
-                            font=dict(family="Arial, sans-serif", size=14, color="#333333")
-                        )
-                        
-                        # 各サブプロットの軸を調整
-                        fig_decomp.update_xaxes(
-                            showgrid=True, 
-                            gridwidth=1, 
-                            gridcolor='rgba(211, 211, 211, 0.5)',
-                            zeroline=False,
-                            showline=True,
-                            linewidth=1,
-                            linecolor='rgba(0, 0, 0, 0.3)'
-                        )
-                        
-                        fig_decomp.update_yaxes(
-                            showgrid=True, 
-                            gridwidth=1, 
-                            gridcolor='rgba(211, 211, 211, 0.5)',
-                            zeroline=True,
-                            zerolinewidth=1.5,
-                            zerolinecolor='rgba(0, 0, 0, 0.2)',
-                            showline=True,
-                            linewidth=1,
-                            linecolor='rgba(0, 0, 0, 0.3)'
-                        )
-                        
-                        # ホバー情報を充実させる
-                        fig_decomp.update_traces(
-                            hovertemplate='<b>%{y:.2f}</b>'
-                        )
-                        
-                        st.plotly_chart(fig_decomp, use_container_width=True)
-                        
-                        # 季節成分の合計を計算（1次元または2次元に対応）
-                        if len(seasonal_components.shape) == 1:
-                            seasonal_sum = seasonal_components
-                        else:
-                            seasonal_sum = np.sum(seasonal_components, axis=1)
-                        
-                        # 分析結果をセッションに保存
-                        st.session_state.eda_results = {
-                            'trend': result.trend,
-                            'seasonal': seasonal_components,
-                            'seasonal_components': {f'seasonal_{period}': seasonal_components[:, i] if i < seasonal_components.shape[1] else np.zeros_like(result.trend) for i, period in enumerate(periods)},
-                            'resid': result.resid,
-                            'periods': periods,
-                            'data': target_data
-                        }
-                        
-                        # 分解結果の統計情報（より視覚的に）
-                        st.subheader("成分分析")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        trend_contrib = np.var(result.trend)/np.var(target_data)*100
-                        seasonal_contrib = np.var(seasonal_sum)/np.var(target_data)*100
-                        resid_contrib = np.var(result.resid)/np.var(target_data)*100
-                        
-                        with col1:
-                            st.metric("トレンド成分の寄与度", f"{trend_contrib:.1f}%", 
-                                     delta=f"{trend_contrib-33.3:.1f}pp" if trend_contrib > 33.3 else f"{trend_contrib-33.3:.1f}pp")
-                        with col2:
-                            st.metric("季節成分の寄与度", f"{seasonal_contrib:.1f}%", 
-                                     delta=f"{seasonal_contrib-33.3:.1f}pp" if seasonal_contrib > 33.3 else f"{seasonal_contrib-33.3:.1f}pp")
-                        with col3:
-                            st.metric("残差成分の寄与度", f"{resid_contrib:.1f}%", 
-                                     delta=f"{resid_contrib-33.3:.1f}pp" if resid_contrib > 33.3 else f"{resid_contrib-33.3:.1f}pp")
-                        
-                        # 残差の定常性検定
-                        st.subheader("残差の定常性分析")
-                        
-                        # ADF検定の実施
-                        adf_result = adfuller(result.resid)
-                        adf_pvalue = adf_result[1]
-                        
-                        # 結果の表示
-                        if adf_pvalue < 0.05:
-                            st.success(f"残差は定常的です（ADF検定 p値: {adf_pvalue:.4f}）")
-                        else:
-                            st.warning(f"残差は非定常的である可能性があります（ADF検定 p値: {adf_pvalue:.4f}）")
-                        
-                        # 残差の自己相関と偏自己相関の可視化
-                        st.write("残差の自己相関と偏自己相関")
-                        
-                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-                        plot_acf(result.resid, ax=ax1, lags=40)
-                        ax1.set_title("残差の自己相関関数 (ACF)")
-                        
-                        plot_pacf(result.resid, ax=ax2, lags=40)
-                        ax2.set_title("残差の偏自己相関関数 (PACF)")
-                        
-                        plt.tight_layout()
-                        st.pyplot(fig)
-                        
-                        # 残差のQQプロットと分布
-                        st.write("残差の分布分析")
-                        
-                        fig_resid = make_subplots(rows=1, cols=2, 
-                                                 subplot_titles=("残差のヒストグラム", "残差のQQプロット"),
-                                                 specs=[[{"type": "xy"}, {"type": "xy"}]])
-                        
-                        # ヒストグラム
-                        fig_resid.add_trace(
-                            go.Histogram(
-                                x=result.resid,
-                                nbinsx=30,
-                                name="残差",
-                                marker_color='rgba(0, 0, 255, 0.6)'
-                            ),
-                            row=1, col=1
-                        )
-                        
-                        # QQプロット用のデータ準備
-                        from scipy import stats
-                        resid_sorted = np.sort(result.resid)
-                        norm_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, len(resid_sorted)))
-                        
-                        # QQプロット
-                        fig_resid.add_trace(
-                            go.Scatter(
-                                x=norm_quantiles,
-                                y=resid_sorted,
-                                mode='markers',
-                                name='QQプロット',
-                                marker=dict(color='rgba(255, 0, 0, 0.6)')
-                            ),
-                            row=1, col=2
-                        )
-                        
-                        # 理論線の追加
-                        slope, intercept = np.polyfit(norm_quantiles, resid_sorted, 1)
-                        line_x = np.array([min(norm_quantiles), max(norm_quantiles)])
-                        line_y = slope * line_x + intercept
-                        
-                        fig_resid.add_trace(
-                            go.Scatter(
-                                x=line_x,
-                                y=line_y,
-                                mode='lines',
-                                name='理論線',
-                                line=dict(color='black', dash='dash')
-                            ),
-                            row=1, col=2
-                        )
-                        
-                        fig_resid.update_layout(
-                            height=500,
-                            template="plotly_white",
-                            showlegend=False
-                        )
-                        
-                        st.plotly_chart(fig_resid, use_container_width=True)
-                                            
-                        st.success("時系列分解が完了しました。次のステップに進むことができます。")
-                    else:
-                        st.info("有効な周期が見つかりませんでした。")
-                else:
-                    st.info("正の周波数成分が見つかりませんでした。")
-            except Exception as e:
-                st.error(f"時系列分解中にエラーが発生しました: {str(e)}")
-        else:
-            st.info("特定された周波数成分がありません。MSTLを実行できません。")
     with tab2:
         st.subheader("変数間の相関分析")
         
@@ -551,3 +462,49 @@ def show_eda_page():
     if st.button("トレーニングページへ進む", use_container_width=True):
         st.session_state.page = 'training'  # トレーニングページに遷移
         st.rerun()
+
+def calculate_periods_from_fft(target_data, fft_result, freqs):
+    """FFTの結果から適切な周期を計算する（改良版）"""
+    N = len(target_data)
+    
+    # FFT結果から振幅スペクトルを計算
+    amplitude = np.abs(fft_result)
+    
+    # ナイキスト周波数までの部分のみを使用
+    amplitude = amplitude[1:N//2]
+    frequencies = freqs[1:N//2]
+    
+    # 振幅の閾値を設定（最大値の10%）
+    threshold = 0.1 * np.max(amplitude)
+    
+    # 重要な周波数成分を特定
+    significant_indices = amplitude > threshold
+    significant_freqs = frequencies[significant_indices]
+    significant_amps = amplitude[significant_indices]
+    
+    # 周期を計算（正しい計算方法）
+    periods = []
+    for f in significant_freqs:
+        if f > 0:  # 念のためのチェック
+            period = 1.0 / f  # 周波数の逆数が周期
+            if 2 <= period <= N/2:  # 有効な周期範囲をチェック
+                periods.append(period)
+    
+    # 周期を近い値でグループ化
+    periods = sorted(periods)
+    unique_periods = []
+    if periods:
+        current_period = periods[0]
+        unique_periods.append(current_period)
+        
+        for period in periods[1:]:
+            # 前の周期と20%以上異なる場合のみ追加
+            if period > current_period * 1.2:
+                current_period = period
+                unique_periods.append(current_period)
+    
+    # 周期を整数に丸める
+    final_periods = [int(round(p)) for p in unique_periods]
+    final_periods = sorted(list(set(final_periods)))  # 重複を除去
+    
+    return final_periods
