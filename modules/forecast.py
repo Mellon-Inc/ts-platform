@@ -186,60 +186,43 @@ def forecast_with_prophet(model, last_date, periods, unit, date_col, target_col)
     elif unit == "年":
         freq = 'Y'
     
-    # 未来の日付リストを作成
-    future = model.make_future_dataframe(periods=periods, freq=freq)
+    # 未来の日付リストを作成 - 学習データの終了日以降のデータを確実に生成するため、
+    # last_dateの翌日から指定された期間分のデータを生成
+    if isinstance(last_date, str):
+        last_date = pd.to_datetime(last_date)
+    
+    # タイムゾーン情報を削除
+    last_date = pd.to_datetime(last_date).tz_localize(None)
+    
+    # 強制的に予測用の未来日付を生成（make_future_dataframeではなく直接日付レンジを生成）
+    if unit == "日":
+        future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='D')
+    elif unit == "週":
+        future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='W')
+    elif unit == "月":
+        future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='MS')
+    elif unit == "四半期":
+        future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='QS')
+    elif unit == "年":
+        future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='YS')
+    
+    # Prophetの予測用データフレームを作成
+    future = pd.DataFrame({'ds': future_dates})
     
     # 予測実行
     forecast = model.predict(future)
     
     # 元のdatetime形式に戻す
-    forecast_df = pd.DataFrame({
+    future_df = pd.DataFrame({
         date_col: forecast['ds'],
         target_col: forecast['yhat'],
         'yhat_lower': forecast['yhat_lower'],
         'yhat_upper': forecast['yhat_upper']
     })
     
-    # 予測期間のみ抽出（日付を確実に比較できるようにする）
-    if isinstance(last_date, str):
-        last_date = pd.to_datetime(last_date)
-    
-    # タイムゾーン情報を削除して日付の型を統一
-    last_date = pd.to_datetime(last_date).tz_localize(None)
-    forecast_df[date_col] = pd.to_datetime(forecast_df[date_col]).dt.tz_localize(None)
-    
     # 予測結果をデバッグ出力
-    st.write(f"予測総レコード数: {len(forecast_df)}")
-    st.write(f"最終日付: {last_date}")
-    
-    # 未来データのみを抽出
-    future_df = forecast_df[forecast_df[date_col] > last_date].reset_index(drop=True)
-    
-    # 抽出結果をデバッグ出力
-    st.write(f"将来予測レコード数: {len(future_df)}")
-    
-    if len(future_df) == 0:
-        st.warning("予測期間が正しく設定されていない可能性があります。")
-        # 簡易的な対応として、最終日付の翌日から予測期間分のデータを生成
-        if unit == "日":
-            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='D')
-        elif unit == "週":
-            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='W')
-        elif unit == "月":
-            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='MS')
-        elif unit == "四半期":
-            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='QS')
-        elif unit == "年":
-            future_dates = pd.date_range(start=last_date + timedelta(days=1), periods=periods, freq='YS')
-        
-        # 強制的に予測データを生成
-        future_data = model.predict(pd.DataFrame({'ds': future_dates}))
-        future_df = pd.DataFrame({
-            date_col: future_data['ds'],
-            target_col: future_data['yhat'],
-            'yhat_lower': future_data['yhat_lower'],
-            'yhat_upper': future_data['yhat_upper']
-        })
+    st.write(f"予測期間: {periods} {unit}")
+    st.write(f"生成された予測データ数: {len(future_df)}")
     
     return future_df, forecast
 
