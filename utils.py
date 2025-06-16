@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, List, Union, Tuple, Any, Optional
+from modules.data_loader import load_data
 
 # セッション状態の初期化
 def initialize_session_state():
@@ -35,7 +36,7 @@ def recommend_columns(df):
 @st.cache_data(ttl=3600)
 def load_cached_data(file):
     """データ読み込みをキャッシュする"""
-    return pd.read_csv(file)
+    return load_data(file)
 
 def show_success(message: str):
     """成功メッセージを表示"""

@@ -125,16 +125,20 @@ def show_eda_page():
         
         # 重要な周期の説明
         significant_periods = periods[significant_indices]
+        significant_amplitudes = positive_amplitude[significant_indices]
         if len(significant_periods) > 0:
-            sorted_periods = np.sort(significant_periods)
-            period_info = ", ".join([f"{p:.1f}" for p in sorted_periods])
+            # 周期と振幅のペアを作成
+            periods_and_amplitudes = list(zip(significant_periods, significant_amplitudes))
+            sorted_pairs = sorted(periods_and_amplitudes, key=lambda x: x[0])  # 周期でソート
+            
+            period_info = ", ".join([f"{p:.1f}" for p, _ in sorted_pairs])
             st.info(f"検出された重要な周期（データポイント数）: {period_info}")
             
             # データ頻度に基づいた解釈を追加
             if st.session_state.data_frequency:
                 freq = st.session_state.data_frequency
                 st.write("データ頻度に基づく解釈:")
-                for p in sorted_periods:
+                for p, _ in sorted_pairs:
                     if freq == 'D':
                         if 350 <= p <= 380:
                             st.write(f"- 周期 {p:.1f}: 約1年の季節性")
@@ -156,7 +160,7 @@ def show_eda_page():
             
             try:
                 # 周期を整数に丸めて使用
-                mstl_periods = [int(round(p)) for p in sorted_periods]
+                mstl_periods = [int(round(p)) for p, _ in sorted_pairs]
                 # 重複を除去して昇順にソート
                 mstl_periods = sorted(list(set(mstl_periods)))
                 
@@ -221,6 +225,7 @@ def show_eda_page():
                         },
                         'resid': residuals,
                         'periods': valid_periods,
+                        'periods_and_amplitudes': sorted_pairs,  # 周期と振幅のペアを保存
                         'data': target_data
                     }
                     
@@ -382,6 +387,12 @@ def show_eda_page():
                     st.subheader(f"{selected_target}との相関係数")
                     target_corr = corr_matrix[selected_target].sort_values(ascending=False)
                     target_corr = target_corr.drop(selected_target)  # 自身との相関を除外
+                    
+                    # 相関係数をセッションに保存
+                    if 'eda_results' not in st.session_state:
+                        st.session_state.eda_results = {}
+                    st.session_state.eda_results['target_correlations'] = target_corr.to_dict()
+                    st.session_state.eda_results['target_name'] = selected_target
                     
                     # 相関係数の棒グラフ
                     fig_target_corr = go.Figure()

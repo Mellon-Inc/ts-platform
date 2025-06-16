@@ -18,7 +18,7 @@ def show_upload_page():
                     xls = pd.ExcelFile(uploaded_file)
                     sheet_name = st.selectbox("シートを選択してください", xls.sheet_names)
                     # データの読み込み（Excelの場合）
-                    df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+                    df = load_cached_data(uploaded_file)
                     st.session_state['data_source'] = {'type': 'excel', 'file': uploaded_file, 'sheet': sheet_name}
                 except ImportError:
                     st.error("Excelファイルを読み込むには'openpyxl'が必要です。'pip install openpyxl'でインストールしてください。")

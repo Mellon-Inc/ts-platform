@@ -266,17 +266,20 @@ def show_preprocessing_page():
                     df_before = df.copy()
                     
                     # 正規化処理の実装
+                    scaling_params = {}  # スケーリングパラメータを保存する辞書
                     if normalization_method == "Min-Max スケーリング":
                         for col in selected_cols:
                             min_val = df[col].min()
                             max_val = df[col].max()
                             df[col] = (df[col] - min_val) / (max_val - min_val)
+                            scaling_params[col] = {'method': 'minmax', 'min': min_val, 'max': max_val}
                     
                     elif normalization_method == "標準化 (Z-スコア)":
                         for col in selected_cols:
                             mean_val = df[col].mean()
                             std_val = df[col].std()
                             df[col] = (df[col] - mean_val) / std_val
+                            scaling_params[col] = {'method': 'standard', 'mean': mean_val, 'std': std_val}
                     
                     elif normalization_method == "ロバストスケーリング":
                         for col in selected_cols:
@@ -285,6 +288,10 @@ def show_preprocessing_page():
                             q3 = df[col].quantile(0.75)
                             iqr = q3 - q1
                             df[col] = (df[col] - median_val) / iqr
+                            scaling_params[col] = {'method': 'robust', 'median': median_val, 'iqr': iqr}
+                    
+                    # スケーリングパラメータをセッションステートに保存
+                    st.session_state.scaling_params = scaling_params
                     
                     # 結果の表示
                     st.success(f"{normalization_method}による正規化が完了しました")
