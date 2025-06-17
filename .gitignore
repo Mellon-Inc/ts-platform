@@ -224,3 +224,7 @@ env/
 
 # Windows
 Thumbs.db
+
+#その他ignore
+.zip
+.ts-platform-legacy/

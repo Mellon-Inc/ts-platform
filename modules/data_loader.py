@@ -3,6 +3,7 @@ import numpy as np
 import streamlit as st
 from typing import Optional, Dict, Any, Union
 import os
+from sklearn.preprocessing import LabelEncoder
 
 @st.cache_data(ttl=3600)
 def load_data(file_obj: Any) -> pd.DataFrame:
@@ -36,6 +37,44 @@ def load_data(file_obj: Any) -> pd.DataFrame:
         else:
             st.error(f"サポートされていないファイル形式です: {file_extension}")
             return None
+
+        with st.expander("データ型変換の詳細", expanded=False):
+            st.write("データ読み込み直後の列情報:", df.dtypes)  # デバッグ用
+
+            # 曜日列の検出と変換
+            weekday_cols = []  # 曜日列を保存するリスト
+            for col in df.columns:
+                st.write(f"列名チェック: {col}")  # デバッグ用
+                # カテゴリ変数の自動検出（曜日・天気・カテゴリなど）
+                if (
+                    '曜日' in col or
+                    'weekday' in col.lower() or
+                    'dayofweek' in col.lower() or
+                    '天気' in col or
+                    'weather' in col.lower() or
+                    'カテゴリ' in col or
+                    'category' in col.lower()
+                ):
+                    weekday_cols.append(col)
+                    st.write(f"カテゴリ列を検出: {col}")  # デバッグ用
+                    st.write(f"変換前のデータ型: {df[col].dtype}")  # デバッグ用
+                    st.write(f"変換前のユニークな値: {df[col].unique()}")  # デバッグ用
+                    try:
+                        # 文字列としてカテゴリ型に変換
+                        df[col] = df[col].astype(str).astype('category')
+                        st.write(f"変換後のデータ型: {df[col].dtype}")  # デバッグ用
+                        st.write(f"変換後のユニークな値: {df[col].unique()}")  # デバッグ用
+                        st.success(f"'{col}'列をカテゴリ型に変換しました")
+                    except Exception as e:
+                        st.warning(f"'{col}'列のカテゴリ変換に失敗しました: {str(e)}")
+            
+            # 曜日列を最後に移動
+            if weekday_cols:
+                # 曜日列以外の列
+                other_cols = [col for col in df.columns if col not in weekday_cols]
+                # 列を並び替え
+                df = df[other_cols + weekday_cols]
+                st.success(f"曜日列 {', '.join(weekday_cols)} をデータフレームの最後に移動しました")
             
         return df
     except Exception as e:
@@ -65,6 +104,21 @@ def infer_data_types(df: pd.DataFrame) -> pd.DataFrame:
             try:
                 df_copy[col] = pd.to_datetime(df_copy[col])
             except:
+                pass
+        
+        # 曜日列の検出と変換
+        elif '曜日' in col or 'weekday' in col.lower() or 'dayofweek' in col.lower():
+            try:
+                # まず文字列として扱う
+                df_copy[col] = df_copy[col].astype(str)
+                le = LabelEncoder()
+                # 変換を実行
+                encoded_values = le.fit_transform(df_copy[col])
+                # 明示的に整数型に変換
+                df_copy[col] = encoded_values.astype(int)
+            except Exception as e:
+                st.warning(f"曜日列の変換に失敗しました: {str(e)}")
+                # 失敗した場合は元の値を保持
                 pass
         
         # 数値への変換を試みる

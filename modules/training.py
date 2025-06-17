@@ -9,7 +9,7 @@ from sklearn.model_selection import TimeSeriesSplit, train_test_split
 from statsmodels.tsa.arima.model import ARIMA
 from prophet import Prophet
 import lightgbm
-from lightgbm import LGBMRegressor
+from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -46,7 +46,8 @@ def show_training_page():
     # モデル選択オプション
     model_options = {
         "Prophet": "Facebookが開発した時系列予測モデル - 複雑な季節性と休日効果を扱えます",
-        "LGBM": "Light Gradient Boosting Machine - 非線形パターンの予測に強い機械学習モデル"
+        "LGBM": "Light Gradient Boosting Machine - 非線形パターンの予測に強い機械学習モデル",
+        "LGBM (実験的)": "改良版Light Gradient Boosting Machine - より高度な特徴量エンジニアリングと最適化"
     }
     
     # 推奨モデルの表示
@@ -185,7 +186,7 @@ def show_training_page():
             "custom_periods": custom_periods if 'custom_periods' in locals() else {}
         }
         
-    elif selected_model == "LGBM":
+    elif selected_model in ["LGBM", "LGBM (実験的)"]:
         # EDA結果から推奨パラメータを取得
         num_leaves, max_depth, learning_rate = recommend_lgbm_params(eda_results)
         
@@ -205,13 +206,61 @@ def show_training_page():
             lag_features = st.checkbox("ラグ特徴量", value=True)
         with col2:
             window_features = st.checkbox("ウィンドウ統計量", value=True)
+            
+        # 実験的LGBMの場合の追加特徴量
+        if selected_model == "LGBM (実験的)":
+            st.write("追加の特徴量:")
+            col1, col2 = st.columns(2)
+            with col1:
+                use_trend_feature = st.checkbox("トレンド特徴量", value=False, help="EDAで分解されたトレンド成分を特徴量として使用")
+            with col2:
+                minmax_features = st.checkbox("最大値・最小値差分特徴量", value=False, help="検出された周期ごとの最大値・最小値との差分を特徴量として使用")
+
+            # 周期と振幅の閾値設定
+            st.write("周期・振幅の閾値設定:")
+            col1, col2 = st.columns(2)
+            with col1:
+                period_threshold = st.number_input("周期の閾値:", min_value=1, max_value=100, value=50, help="この値を超える周期のみを使用")
+            with col2:
+                amplitude_threshold = st.number_input("振幅の閾値:", min_value=1, max_value=100, value=50, help="この値を超える振幅のみを使用")
+
+            # 相関係数の閾値設定
+            st.write("相関係数の閾値設定:")
+            correlation_threshold = st.slider(
+                "相関係数の閾値:",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.95,
+                step=0.01,
+                help="この値以上の相関係数を持つ説明変数を除外します"
+            )
+
+            # Optunaの設定
+            st.write("ハイパーパラメータ最適化:")
+            use_optuna = st.checkbox('Optunaによる自動チューニングを使用', value=False)
+            if use_optuna:
+                n_trials = st.slider('Optunaの試行回数', min_value=10, max_value=200, value=50)
+        else:
+            # 実験的LGBMでない場合はデフォルト値を設定
+            use_trend_feature = False
+            minmax_features = False
+            use_optuna = False
+            n_trials = None
+            period_threshold = 50
+            amplitude_threshold = 50
+            correlation_threshold = 1.0  # 相関フィルタリングを無効化
         
         model_params = {
             "num_leaves": num_leaves,
             "max_depth": max_depth,
             "learning_rate": learning_rate,
             "lag_features": lag_features,
-            "window_features": window_features
+            "window_features": window_features,
+            "use_trend_feature": use_trend_feature if selected_model == "LGBM (実験的)" else False,
+            "minmax_features": minmax_features if selected_model == "LGBM (実験的)" else False,
+            "period_threshold": period_threshold,
+            "amplitude_threshold": amplitude_threshold,
+            "correlation_threshold": correlation_threshold
         }
     
     # トレーニングボタン
@@ -225,6 +274,26 @@ def show_training_page():
             elif selected_model == "LGBM":
                 model, predictions, metrics = train_lgbm_model(
                     train_data, test_data, date_col, target_col, model_params
+                )
+            elif selected_model == "LGBM (実験的)":
+                from .LGBMtraining_experimental import train_lgbm_model_experimental
+                
+                # データを結合して is_train フラグを追加
+                all_data = pd.concat([
+                    train_data.assign(is_train=True),
+                    test_data.assign(is_train=False)
+                ]).reset_index(drop=True)
+                
+                # 日付列名を 'ds' に変更
+                all_data = all_data.rename(columns={date_col: 'ds'})
+                
+                # モデルのトレーニングと予測
+                model, predictions, metrics = train_lgbm_model_experimental(
+                    df=all_data,
+                    target_col=target_col,
+                    model_params=model_params,
+                    use_optuna=use_optuna,
+                    n_trials=n_trials
                 )
             
             # 結果の表示
@@ -452,67 +521,52 @@ def train_lgbm_model(train_data, test_data, date_col, target_col, params):
     """LGBMモデルのトレーニングと評価"""
     # データリークを防ぐために全データを連結してから特徴量作成
     all_data = pd.concat([train_data, test_data]).reset_index(drop=True)
-    all_features = create_features(all_data, date_col, target_col, params)
+    
+    # 特徴量生成
+    features = create_features(all_data, date_col, target_col, params)
     
     # トレーニングデータとテストデータを再分割
-    train_features = all_features[:len(train_data)]
-    test_features = all_features[len(train_data):]
+    train_features = features[:len(train_data)]
+    test_features = features[len(train_data):]
     
-    # トレーニングデータとテストデータの準備
-    X_train = train_features.drop([target_col], axis=1)
-    if date_col in X_train.columns:
-        X_train = X_train.drop([date_col], axis=1)
-    y_train = train_features[target_col]
+    # 直接の値を予測対象にする
+    X_train = train_features.copy()
+    y_train = train_data[target_col]
     
-    X_test = test_features.drop([target_col], axis=1)
-    if date_col in X_test.columns:
-        X_test = X_test.drop([date_col], axis=1)
-    y_test = test_features[target_col]
+    X_test = test_features.copy()
+    y_test = test_data[target_col]
     
-    # 特徴量の型を確認し、数値型に変換
-    numeric_columns = []
-    for col in X_train.columns:
-        try:
-            # 数値型への変換を試みる
-            X_train[col] = pd.to_numeric(X_train[col])
-            X_test[col] = pd.to_numeric(X_test[col])
-            numeric_columns.append(col)
-        except:
-            st.warning(f"列 '{col}' は数値型に変換できないため、除外されます。")
-            continue
-    
-    # 数値型の列のみを選択
-    X_train = X_train[numeric_columns]
-    X_test = X_test[numeric_columns]
-    
-    # 特徴量が少なくとも1つあることを確認
-    if X_train.shape[1] == 0:
-        st.error("モデルトレーニングに有効な特徴量がありません。データを確認してください。")
-        # 単純な特徴量を追加（時間的な順序を表す）
-        X_train['index'] = np.arange(len(X_train))
-        X_test['index'] = np.arange(len(X_test))
-    
-    # 検証データを作成（早期停止用）- データリーク防止
-    X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
-    
-    # LGBMモデルの初期化
+    # モデルのパラメータを調整
     model = LGBMRegressor(
         num_leaves=params["num_leaves"],
         max_depth=params["max_depth"],
         learning_rate=params["learning_rate"],
-        n_estimators=1000  # 最大イテレーション数を増やし、早期停止に任せる
+        n_estimators=2000,     # より多くの学習機会
+        min_child_samples=20,  # より細かいパターンを学習
+        subsample=0.8,
+        colsample_bytree=0.8,
+        reg_alpha=0.1,
+        reg_lambda=0.1,
+        random_state=42,       # 再現性のため
+        importance_type='gain', # 特徴量重要度の計算方法
+        metric='rmse'          # 評価指標
     )
     
-    # モデルのトレーニング - テストデータではなく検証データで早期停止
+    # コールバックを設定
+    callbacks = [
+        early_stopping(stopping_rounds=100, verbose=True),  # 早期停止
+        log_evaluation(period=100)                          # ログ出力
+    ]
+    
+    # モデルのトレーニング
     model.fit(
-        X_tr, 
-        y_tr,
-        eval_set=[(X_val, y_val)],
-        callbacks=[lightgbm.early_stopping(stopping_rounds=10)],  # 正しい早期停止の構文
-        eval_metric='rmse'  # 評価指標を明示的に指定
+        X_train, 
+        y_train,
+        eval_set=[(X_test, y_test)],
+        callbacks=callbacks
     )
     
-    # テストデータでの予測
+    # 予測と評価
     y_pred = model.predict(X_test)
     
     # 評価指標の計算
@@ -528,122 +582,68 @@ def train_lgbm_model(train_data, test_data, date_col, target_col, params):
     
     return model, y_pred, metrics
 
-def create_features(data, date_col, target_col, params):
-    """時系列特徴量を生成する関数"""
+def create_features(data, date_col, target_col, params, debug_output=False):
     df = data.copy()
     
-    # 日付列がdatetime型かチェックし、必要に応じて変換
-    try:
-        if df[date_col].dtype != 'datetime64[ns]':
-            df[date_col] = pd.to_datetime(df[date_col])
-        
-        # 基本的な日付特徴量
-        df['year'] = df[date_col].dt.year
-        df['month'] = df[date_col].dt.month
-        df['day'] = df[date_col].dt.day
-        df['dayofweek'] = df[date_col].dt.dayofweek
-        df['quarter'] = df[date_col].dt.quarter
-        
-        # 追加の日付特徴量
-        df['weekofyear'] = df[date_col].dt.isocalendar().week
-        df['dayofyear'] = df[date_col].dt.dayofyear
-        df['is_month_start'] = df[date_col].dt.is_month_start.astype(int)
-        df['is_month_end'] = df[date_col].dt.is_month_end.astype(int)
-        
-        # 時間関連の特徴量（データに時間情報がある場合）
-        if df[date_col].dt.hour.nunique() > 1:
-            df['hour'] = df[date_col].dt.hour
-            df['minute'] = df[date_col].dt.minute
-            
-        # 季節性を捉えるための周期的特徴量
-        # 月の周期性
-        df['month_sin'] = np.sin(2 * np.pi * df['month'] / 12)
-        df['month_cos'] = np.cos(2 * np.pi * df['month'] / 12)
-        # 曜日の周期性
-        df['dayofweek_sin'] = np.sin(2 * np.pi * df['dayofweek'] / 7)
-        df['dayofweek_cos'] = np.cos(2 * np.pi * df['dayofweek'] / 7)
-        # 日の周期性
-        df['day_sin'] = np.sin(2 * np.pi * df['day'] / 31)
-        df['day_cos'] = np.cos(2 * np.pi * df['day'] / 31)
-        
-    except (TypeError, ValueError) as e:
-        st.warning(f"日付列からの特徴量生成で一部エラーが発生しました: {e}")
-        # 基本的な特徴量生成を試みる
-        try:
-            # 年月日が別々のカラムとして存在する場合の対応
-            if 'year' in df.columns and 'month' in df.columns and 'day' in df.columns:
-                pass  # 既にある場合は何もしない
-            else:
-                # インデックスを特徴量として使用
-                df['index_feature'] = np.arange(len(df))
-        except Exception as inner_e:
-            st.error(f"特徴量生成に失敗しました: {inner_e}")
-            df['index_feature'] = np.arange(len(df))
+    # 差分を計算（新規追加）
+    df['target_diff'] = df[target_col].diff()
     
-    # ラグ特徴量の生成
-    if params["lag_features"]:
-        # EDAから検出された周期に基づいてラグを選択
-        lags = [1]  # 基本的な1日前のラグは常に含める
+    if df[date_col].dtype != 'datetime64[ns]':
+        df[date_col] = pd.to_datetime(df[date_col])
+
+    # 基本的な日付特徴量（既存のまま）
+    df['year'] = df[date_col].dt.year
+    df['month_sin'] = np.sin(2 * np.pi * df[date_col].dt.month / 12)
+    df['month_cos'] = np.cos(2 * np.pi * df[date_col].dt.month / 12)
+    df['dayofweek_sin'] = np.sin(2 * np.pi * df[date_col].dt.dayofweek / 7)
+    df['dayofweek_cos'] = np.cos(2 * np.pi * df[date_col].dt.dayofweek / 7)
+    df['quarter_sin'] = np.sin(2 * np.pi * df[date_col].dt.quarter / 4)
+    df['quarter_cos'] = np.cos(2 * np.pi * df[date_col].dt.quarter / 4)
+    df['dayofyear_sin'] = np.sin(2 * np.pi * df[date_col].dt.dayofyear / 365)
+    df['dayofyear_cos'] = np.cos(2 * np.pi * df[date_col].dt.dayofyear / 365)
+
+    # 重要: 日付列を削除
+    df = df.drop(columns=[date_col])
+
+    # ターゲット列が存在するときだけラグ・移動平均を生成
+    if target_col in df.columns:
+        target_data = df[target_col].copy()
+        target_diff_data = df['target_diff'].copy()  # 差分データも保存
+        df = df.drop(columns=[target_col])  # ターゲット列を特徴量から除外
         
-        # EDAから周期情報を取得
+        if params.get("lag_features", False):
+            for lag in [1, 3, 5, 7, 14, 30]:
+                if len(target_data) > lag:
+                    df[f'lag_{lag}'] = target_data.shift(lag)
+                    # 差分のラグも追加
+                    df[f'diff_lag_{lag}'] = target_diff_data.shift(lag)
+
+        if params.get("window_features", False):
+            windows = [7, 14, 30, 60, 180, 240, 360]
+            for window in windows:
+                if len(target_data) > window:
+                    # 通常の特徴量
+                    df[f'rolling_mean_{window}'] = target_data.rolling(window=window).mean()
+                    df[f'rolling_std_{window}'] = target_data.rolling(window=window).std()
+                    # 差分の特徴量を追加
+                    df[f'diff_rolling_mean_{window}'] = target_diff_data.rolling(window=window).mean()
+                    df[f'diff_rolling_std_{window}'] = target_diff_data.rolling(window=window).std()
+
+    # デバッグ出力をフラグで制御
+    if debug_output:
         if 'eda_results' in st.session_state and 'periods' in st.session_state.eda_results:
-            periods = st.session_state.eda_results['periods']
-            
-            # 周期からラグを追加（小数点を四捨五入して整数化）
-            for period in periods:
-                lag = int(round(period))
-                if lag > 1 and lag not in lags:  # 重複を避ける
-                    lags.append(lag)
-            
-            # 重要な周期のハーモニクス（半分や倍）も考慮
-            for period in periods:
-                # 半周期
-                half_period = int(round(period / 2))
-                if half_period > 1 and half_period not in lags:
-                    lags.append(half_period)
-                
-                # 2倍周期（あまり大きくなりすぎないように制限）
-                double_period = int(round(period * 2))
-                if double_period > 1 and double_period < 100 and double_period not in lags:
-                    lags.append(double_period)
-        
-        # 周期がない場合や特定できなかった場合のデフォルト値
-        if len(lags) <= 1:
-            lags.extend([7, 14, 30])
-            
-        # ラグをソートして重複を除去
-        lags = sorted(list(set(lags)))
-        
-        # ラグ特徴量を生成
-        for lag in lags:
-            if len(df) > lag:
-                df[f'lag_{lag}'] = df[target_col].shift(lag)
-    
-    # 移動平均、標準偏差などの特徴量
-    if params["window_features"]:
-        windows = [7, 14, 30]
-        
-        # EDAから検出された周期に基づいてウィンドウサイズを追加
-        if 'eda_results' in st.session_state and 'periods' in st.session_state.eda_results:
-            periods = st.session_state.eda_results['periods']
-            for period in periods:
-                window = int(round(period))
-                if window > 3 and window not in windows:  # 小さすぎるウィンドウは避ける
-                    windows.append(window)
-                    
-        # 重複を除去してソート
-        windows = sorted(list(set(windows)))
-        
-        for window in windows:
-            if len(df) > window:
-                df[f'rolling_mean_{window}'] = df[target_col].rolling(window=window).mean().shift(1)
-                df[f'rolling_std_{window}'] = df[target_col].rolling(window=window).std().shift(1)
-                df[f'rolling_min_{window}'] = df[target_col].rolling(window=window).min().shift(1)
-                df[f'rolling_max_{window}'] = df[target_col].rolling(window=window).max().shift(1)
-                df[f'rolling_median_{window}'] = df[target_col].rolling(window=window).median().shift(1)
-    
-    # 欠損値を0で埋める
-    df = df.fillna(0)
+            st.write("検出された周期:", st.session_state.eda_results['periods'])
+        st.write("生成された特徴量:", df.columns.tolist())
+        st.write("特徴量サンプル:", df.head())
+
+    # 数値特徴量のスケーリング
+    numeric_features = df.select_dtypes(include=['float64', 'int64']).columns
+    for col in numeric_features:
+        if col != target_col:  # ターゲット変数はスケーリングしない
+            mean = df[col].mean()
+            std = df[col].std()
+            if std > 0:
+                df[col] = (df[col] - mean) / std
     
     return df
 
